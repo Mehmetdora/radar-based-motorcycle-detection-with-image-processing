@@ -1,107 +1,81 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
+#include "arm_math.h"
 
-/* USER CODE END Includes */
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
 
-/* USER CODE END PTD */
+#include "HELPER.h"
+#include "UARTDriver.h"
+#include "TimerDriver.h"
 
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
+#include "IIR_DSP.h"
+#include "FFT_DSP.h"
+#include "RadarSignalHelper.h"
+#include "ADC_DMA_Config.h"
 
-/* USER CODE END PD */
 
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
 
-/* USER CODE END PM */
 
-/* Private variables ---------------------------------------------------------*/
-UART_HandleTypeDef huart2;
 
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_USART2_UART_Init(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
+volatile uint16_t analog_val = 0;
 
-/* USER CODE END 0 */
+uint16_t adc_buffer[256];      	// DMA buraya yazar
+uint16_t adc_fft_buffer[256];	// FFT buraya uygulanır
+volatile uint8_t fft_ready_flag = 0;
 
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
+
+
+volatile float debug_raw_sample;
+volatile float debug_filtered_sample;
+volatile float debug_moto_power;
+volatile float debug_yaya_power;
+
+static char radar_uart_message[RADAR_UART_MESSAGE_MAX_LEN];
+
+
+
+
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
 
-  /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+
+  uart_init();
+
+
+  adc1_init();
+  dma2_init();
+
+  TimerDriver_init(200);
+
+
   while (1)
   {
-    /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
+	  if(fft_ready_flag) {
+		  fft_ready_flag = 0;
+
+		  DetectionInfo result = fft_process(adc_fft_buffer);
+		  RadarSignalReport report = radar_create_report_from_detection(&result);
+
+		  if(report.motion_detected) {
+			  radar_format_uart_message(&report, radar_uart_message, sizeof(radar_uart_message));
+			  uart_send_string(radar_uart_message);
+		  }
+
+	  }
+
   }
-  /* USER CODE END 3 */
 }
 
 /**
@@ -150,38 +124,9 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
 
-  /* USER CODE BEGIN USART2_Init 0 */
 
-  /* USER CODE END USART2_Init 0 */
 
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
-}
 
 /**
   * @brief GPIO Initialization Function

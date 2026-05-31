@@ -17,6 +17,8 @@ ESP32 taradından kaç tane resim gönderilirse model gelen kadarını işleyere
 
 HOST = "0.0.0.0"
 PORT = 5001
+PROTOCOL_MAGIC = b"RDR1"
+MAX_METADATA_BYTES = 1024
 
 SAVE_DIR = Path.home() / "Desktop" / "esp32_photos"
 MODEL_PATH = Path.home() / "Desktop" / "best.pt"
@@ -45,6 +47,55 @@ def recv_exact(conn, n):
             raise ConnectionError("Bağlantı kesildi")
         data += chunk
     return data
+
+
+def peek_exact(conn, n):
+    data = b""
+    while len(data) < n:
+        peeked = conn.recv(n, socket.MSG_PEEK)
+        if not peeked:
+            raise ConnectionError("Bağlantı kesildi")
+        if len(peeked) == len(data):
+            time.sleep(0.001)
+            continue
+        data = peeked
+
+    return data[:n]
+
+
+def recv_session_header(conn):
+    prefix = peek_exact(conn, len(PROTOCOL_MAGIC))
+
+    if prefix == PROTOCOL_MAGIC:
+        recv_exact(conn, len(PROTOCOL_MAGIC))
+        metadata_len = struct.unpack(">H", recv_exact(conn, 2))[0]
+
+        if metadata_len > MAX_METADATA_BYTES:
+            raise ValueError(f"Radar metadata cok uzun: {metadata_len} byte")
+
+        metadata_bytes = recv_exact(conn, metadata_len)
+        metadata = json.loads(metadata_bytes.decode("utf-8")) if metadata_bytes else {}
+        frame_count = struct.unpack("B", recv_exact(conn, 1))[0]
+        return frame_count, metadata, True
+
+    frame_count = struct.unpack("B", recv_exact(conn, 1))[0]
+    return frame_count, {}, False
+
+
+def enrich_result_with_radar_metadata(result, radar_metadata):
+    if not radar_metadata:
+        return result
+
+    result["radar_metadata"] = radar_metadata
+    result["stm32_detection_time"] = datetime.now().isoformat(timespec="seconds")
+    result["dominant_doppler_frequency_hz"] = radar_metadata.get("freq_hz")
+    result["radar_signal_power"] = radar_metadata.get("power")
+    result["estimated_speed_kmh"] = radar_metadata.get("speed_kmh")
+    result["first_stage_decision"] = radar_metadata.get("obj")
+    result["radar_motion_detected"] = bool(radar_metadata.get("motion"))
+    result["radar_raw_message"] = radar_metadata.get("raw")
+
+    return result
 
 
 def analyze_burst(image_paths):
@@ -211,10 +262,17 @@ while True:
 
     frame_count = 0
     image_paths = []
+    radar_metadata = {}
+    protocol_version = "legacy"
 
     try:
-        frame_count = struct.unpack("B", recv_exact(conn, 1))[0]
+        frame_count, radar_metadata, has_metadata = recv_session_header(conn)
+        protocol_version = "RDR1" if has_metadata else "legacy"
         print(f"{frame_count} kare bekleniyor")
+
+        if radar_metadata:
+            print("\nRadar metadata alindi:")
+            print(json.dumps(radar_metadata, ensure_ascii=False, indent=2))
 
         for i in range(frame_count):
             size = struct.unpack(">I", recv_exact(conn, 4))[0]
@@ -234,6 +292,7 @@ while True:
 
         print("\nModel çalışıyor...")
         result = analyze_burst(image_paths)
+        result = enrich_result_with_radar_metadata(result, radar_metadata)
 
         print("\n========== DETAYLI MODEL SONUCU ==========")
         print(f"Karar                : {result['decision']}")
@@ -251,6 +310,15 @@ while True:
         print(f"En iyi kare          : {result['best_frame']}")
         print(f"Analiz süresi        : {result['elapsed_seconds']} sn")
         print(f"Karar sebebi         : {result['decision_reason']}")
+
+        if radar_metadata:
+            print("\nSTM32 Radar Bilgisi:")
+            print(f"  Nesne sinifi       : {result['first_stage_decision']}")
+            print(f"  Hareket algilandi  : {'EVET' if result['radar_motion_detected'] else 'HAYIR'}")
+            print(f"  Sinyal gucu        : {result['radar_signal_power']}")
+            print(f"  Frekans            : {result['dominant_doppler_frequency_hz']} Hz")
+            print(f"  Hiz                : {result['estimated_speed_kmh']} km/h")
+            print(f"  Ham mesaj          : {result['radar_raw_message']}")
 
         print("\nSınıf özeti:")
         if result["class_summary"]:
@@ -277,6 +345,7 @@ while True:
         result_file = session_dir / "result.txt"
         json_file = session_dir / "result.json"
         csv_file = session_dir / "frame_details.csv"
+        metadata_file = session_dir / "radar_metadata.json"
 
         with open(result_file, "w", encoding="utf-8") as f:
             f.write("DETAYLI MODEL SONUCU\n")
@@ -299,6 +368,23 @@ while True:
             f.write(f"En iyi kare         : {result['best_frame']}\n")
             f.write(f"Analiz süresi       : {result['elapsed_seconds']} sn\n")
             f.write(f"Karar sebebi        : {result['decision_reason']}\n\n")
+
+            f.write("STM32 Radar Bilgisi\n")
+            f.write("-------------------\n")
+            if radar_metadata:
+                f.write(f"Protokol            : {protocol_version}\n")
+                f.write(f"Ham mesaj           : {result['radar_raw_message']}\n")
+                f.write(f"Nesne sınıfı        : {result['first_stage_decision']}\n")
+                f.write(
+                    f"Hareket algılandı   : {'EVET' if result['radar_motion_detected'] else 'HAYIR'}\n"
+                )
+                f.write(f"Sinyal gücü         : {result['radar_signal_power']}\n")
+                f.write(
+                    f"Doppler frekansı    : {result['dominant_doppler_frequency_hz']} Hz\n"
+                )
+                f.write(f"Tahmini hız         : {result['estimated_speed_kmh']} km/h\n\n")
+            else:
+                f.write("Bu oturumda radar metadata alınmadı.\n\n")
 
             f.write("Eşik Değerleri\n")
             f.write("-------------\n")
@@ -348,6 +434,9 @@ while True:
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=4)
 
+        with open(metadata_file, "w", encoding="utf-8") as f:
+            json.dump(radar_metadata, f, ensure_ascii=False, indent=4)
+
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(
@@ -382,6 +471,7 @@ while True:
 
         print(f"Sonuç TXT kaydedildi : {result_file}")
         print(f"Sonuç JSON kaydedildi: {json_file}")
+        print(f"Radar JSON kaydedildi: {metadata_file}")
         print(f"Kare CSV kaydedildi  : {csv_file}")
 
     except Exception as e:

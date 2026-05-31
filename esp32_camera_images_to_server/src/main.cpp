@@ -1,5 +1,6 @@
 #include "Arduino.h"
 #include "esp_camera.h"
+#include "HardwareSerial.h"
 #include <WiFi.h>
 
 #define CAMERA_MODEL_XIAO_ESP32S3
@@ -12,6 +13,14 @@ const uint16_t port  = 5001;
 #define FRAME_INTERVAL_MS   45      // kareler arası bekleme (ms)
 #define CAPTURE_MS          3000    // toplam süre
 
+#define RADAR_UART_BAUD     115200
+#define RADAR_UART_RX_PIN   44      // STM32 USART2 TX (PA2) bu pine bağlanmalı
+#define RADAR_UART_TX_PIN   43      // Gerekirse STM32 RX tarafına bağlanabilir
+#define RADAR_LINE_MAX_LEN  128
+
+static const char* IMAGE_PROTOCOL_MAGIC = "RDR1";
+
+HardwareSerial RadarSerial(1);
 
 
 #define PWDN_GPIO_NUM  -1
@@ -39,6 +48,18 @@ struct Frame {
 
 Frame frames[MAX_FRAMES];
 int frameCount = 0;
+
+struct RadarMetadata {
+    String rawLine;
+    String objectClass;
+    bool motionDetected;
+    float signalPower;
+    float peakFrequencyHz;
+    float estimatedSpeedKmh;
+};
+
+char radarLineBuffer[RADAR_LINE_MAX_LEN];
+uint8_t radarLineIndex = 0;
 
 void initCamera() {
     camera_config_t config;
@@ -125,7 +146,73 @@ void captureFrames() {
     Serial.printf("Çekim bitti: %d kare, %lu ms\n", frameCount, millis() - start);
 }
 
-void sendAllFrames() {
+String jsonEscape(const String& value) {
+    String escaped;
+    escaped.reserve(value.length() + 8);
+
+    for (size_t i = 0; i < value.length(); i++) {
+        char c = value.charAt(i);
+        switch (c) {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                if ((uint8_t)c < 0x20) {
+                    char encoded[7];
+                    snprintf(encoded, sizeof(encoded), "\\u%04X", (uint8_t)c);
+                    escaped += encoded;
+                } else {
+                    escaped += c;
+                }
+                break;
+        }
+    }
+
+    return escaped;
+}
+
+String buildRadarMetadataJson(const RadarMetadata& radar) {
+    String json;
+    json.reserve(220);
+
+    json += "{";
+    json += "\"source\":\"STM32_HB100\",";
+    json += "\"raw\":\"" + jsonEscape(radar.rawLine) + "\",";
+    json += "\"obj\":\"" + jsonEscape(radar.objectClass) + "\",";
+    json += "\"motion\":";
+    json += radar.motionDetected ? "1" : "0";
+    json += ",\"power\":";
+    json += String(radar.signalPower, 2);
+    json += ",\"freq_hz\":";
+    json += String(radar.peakFrequencyHz, 2);
+    json += ",\"speed_kmh\":";
+    json += String(radar.estimatedSpeedKmh, 2);
+    json += "}";
+
+    return json;
+}
+
+void writeUint16BE(WiFiClient& client, uint16_t value) {
+    uint8_t bytes[2] = {
+        (uint8_t)(value >> 8),
+        (uint8_t)(value)
+    };
+    client.write(bytes, sizeof(bytes));
+}
+
+void sendAllFrames(const RadarMetadata& radar) {
     if (frameCount == 0) {
         Serial.println("Gönderilecek kare yok.");
         return;
@@ -138,6 +225,17 @@ void sendAllFrames() {
     }
 
     Serial.printf("%d kare gönderiliyor...\n", frameCount);
+
+    String radarJson = buildRadarMetadataJson(radar);
+    if (radarJson.length() > UINT16_MAX) {
+        Serial.println("Radar metadata çok uzun, gönderim iptal edildi.");
+        client.stop();
+        return;
+    }
+
+    client.write((const uint8_t*)IMAGE_PROTOCOL_MAGIC, 4);
+    writeUint16BE(client, (uint16_t)radarJson.length());
+    client.write((const uint8_t*)radarJson.c_str(), radarJson.length());
 
     // Toplam kare sayısını önce gönder
     uint8_t countByte = (uint8_t)frameCount;
@@ -170,8 +268,111 @@ void sendAllFrames() {
     Serial.println("Tüm kareler gönderildi.");
 }
 
+bool parseRadarMessage(String line, RadarMetadata& radar) {
+    line.trim();
+    if (!line.startsWith("HB100")) {
+        return false;
+    }
+
+    radar.rawLine = line;
+    radar.objectClass = "";
+    radar.motionDetected = false;
+    radar.signalPower = 0.0f;
+    radar.peakFrequencyHz = 0.0f;
+    radar.estimatedSpeedKmh = 0.0f;
+
+    bool hasObjectClass = false;
+    bool hasMotion = false;
+
+    int start = 0;
+    while (start < line.length()) {
+        int end = line.indexOf(',', start);
+        if (end < 0) {
+            end = line.length();
+        }
+
+        String token = line.substring(start, end);
+        token.trim();
+
+        int separator = token.indexOf('=');
+        if (separator > 0) {
+            String key = token.substring(0, separator);
+            String value = token.substring(separator + 1);
+            key.trim();
+            value.trim();
+
+            if (key == "OBJ") {
+                radar.objectClass = value;
+                hasObjectClass = true;
+            } else if (key == "MOTION") {
+                radar.motionDetected = (value.toInt() != 0);
+                hasMotion = true;
+            } else if (key == "POWER") {
+                radar.signalPower = value.toFloat();
+            } else if (key == "FREQ_HZ") {
+                radar.peakFrequencyHz = value.toFloat();
+            } else if (key == "SPEED_KMH") {
+                radar.estimatedSpeedKmh = value.toFloat();
+            }
+        }
+
+        start = end + 1;
+    }
+
+    return hasObjectClass && hasMotion;
+}
+
+void handleRadarLine(const char* line) {
+    RadarMetadata radar;
+
+    if (!parseRadarMessage(String(line), radar)) {
+        Serial.print("Geçersiz radar UART mesajı: ");
+        Serial.println(line);
+        return;
+    }
+
+    if (!radar.motionDetected) {
+        Serial.print("Hareket yok, çekim başlatılmadı: ");
+        Serial.println(radar.rawLine);
+        return;
+    }
+
+    Serial.print("Radar tetikledi: ");
+    Serial.println(radar.rawLine);
+
+    captureFrames();
+    sendAllFrames(radar);
+}
+
+void pollRadarUart() {
+    while (RadarSerial.available()) {
+        char c = (char)RadarSerial.read();
+
+        if (c == '\r') {
+            continue;
+        }
+
+        if (c == '\n') {
+            if (radarLineIndex > 0) {
+                radarLineBuffer[radarLineIndex] = '\0';
+                handleRadarLine(radarLineBuffer);
+                radarLineIndex = 0;
+            }
+            continue;
+        }
+
+        if (radarLineIndex < (RADAR_LINE_MAX_LEN - 1)) {
+            radarLineBuffer[radarLineIndex++] = c;
+        } else {
+            radarLineIndex = 0;
+            Serial.println("Radar UART satırı çok uzun, buffer temizlendi.");
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
+    RadarSerial.begin(RADAR_UART_BAUD, SERIAL_8N1, RADAR_UART_RX_PIN, RADAR_UART_TX_PIN);
     delay(1000);
 
     WiFi.begin(ssid, password);
@@ -183,16 +384,9 @@ void setup() {
     Serial.println("\nBağlandı: " + WiFi.localIP().toString());
 
     initCamera();
-    Serial.println("Hazır. manual tetikleme için serial'den c yaz.");
+    Serial.println("Hazır. STM32 HB100 UART mesajı bekleniyor.");
 }
 
 void loop() {
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "c") {
-            captureFrames();   // önceki buffer temizlenir, sonra 3 sn çekilir, bellekte tut
-            sendAllFrames();   // sonra gönder,
-        }
-    }
+    pollRadarUart();
 }
