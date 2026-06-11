@@ -9,6 +9,8 @@
 
 #define RADAR_DECIMAL_SCALE_2  100
 
+
+
 static void append_char(char **cursor, uint16_t *remaining, char value)
 {
 	if (*remaining <= 1U) {
@@ -95,16 +97,23 @@ float radar_calculate_speed_kmh(float peak_frequency_hz)
 
 DetectionResult radar_classify_signal(float peak_frequency_hz, float signal_power)
 {
-	if (signal_power < POWER_THRESHOLD) {
-		return DETECT_NOTHING;
-	}
+    if (signal_power < POWER_THRESHOLD) {
+        return DETECT_NOTHING;
+    }
 
-	if (peak_frequency_hz >= MOTOR_FREQ_THRESHOLD_HZ) {
-		return DETECT_MOTORSIKLET;
-	}
+    if (peak_frequency_hz < MIN_VALID_FREQ_HZ) {
+        return DETECT_NOTHING;
+    }
 
-	return DETECT_YAYA;
+    if (peak_frequency_hz >= MOTOR_FREQ_THRESHOLD_HZ) {
+        return DETECT_MOTORSIKLET;
+    }
+
+    return DETECT_YAYA;
 }
+
+
+
 
 RadarSignalReport radar_create_report(float peak_frequency_hz, float signal_power)
 {
@@ -152,7 +161,39 @@ uint16_t radar_format_uart_message(const RadarSignalReport *report, char *buffer
 
 	buffer[0] = '\0';
 
-	append_string(&cursor, &remaining, "HB100,OBJ=");
+	append_string(&cursor, &remaining, "OBJ=");
+	append_string(&cursor, &remaining, radar_detection_to_text(report->object_class));
+	append_string(&cursor, &remaining, ",MOTION=");
+	append_uint(&cursor, &remaining, report->motion_detected);
+	append_string(&cursor, &remaining, ",POWER=");
+	append_fixed_2(&cursor, &remaining, report->signal_power);
+	append_string(&cursor, &remaining, ",FREQ_HZ=");
+	append_fixed_2(&cursor, &remaining, report->peak_frequency_hz);
+	append_string(&cursor, &remaining, ",SPEED_KMH=");
+	append_fixed_2(&cursor, &remaining, report->estimated_speed_kmh);
+	append_string(&cursor, &remaining, "\r\n");
+
+	return (uint16_t)(cursor - buffer);
+}
+
+
+
+
+
+uint16_t radar_format_final_uart_message(const RadarSignalReport *report, char *buffer, uint16_t buffer_size, uint8_t confirm_count)
+{
+	char *cursor = buffer;
+	uint16_t remaining = buffer_size;
+
+	if ((report == 0) || (buffer == 0) || (buffer_size == 0U)) {
+		return 0U;
+	}
+
+	buffer[0] = '\0';
+	append_string(&cursor, &remaining, "FINAL=TRUE");
+	append_string(&cursor, &remaining, ",CONFIRM_COUNT=");
+	append_uint(&cursor, &remaining, confirm_count);
+	append_string(&cursor, &remaining, ",OBJ=");
 	append_string(&cursor, &remaining, radar_detection_to_text(report->object_class));
 	append_string(&cursor, &remaining, ",MOTION=");
 	append_uint(&cursor, &remaining, report->motion_detected);

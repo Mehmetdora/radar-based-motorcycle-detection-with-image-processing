@@ -20,9 +20,6 @@ static uint8_t fft_is_ready = 0;					// ilk init kontrolü için
 
 
 
-
-
-
 DetectionInfo fft_process(uint16_t *adc_buffer)
 {
     if (!fft_is_ready) {
@@ -96,12 +93,23 @@ DetectionInfo fft_process(uint16_t *adc_buffer)
     float32_t max_mag = 0.0f;
     int max_bin = 0;		// bulunan frekansın indexi
 
+
+
     for (int k = 1; k < FFT_SIZE / 2; k++) {
 
-    	float32_t freq = ((float32_t)k * SAMPLE_RATE) / FFT_SIZE;
-    	if (freq > 45.0f && freq < 55.0f)
-			continue;
+        float32_t freq = ((float32_t)k * SAMPLE_RATE) / FFT_SIZE;
 
+        // Çok düşük frekans: DC drift, elin yavaş hareketi, op-amp salınımı
+        if (freq < MIN_VALID_FREQ_HZ)
+            continue;
+
+        // 50 Hz ve çevresi: elektriksel gürültü / leakage
+        if (freq > MAINS_NOISE_LOW_HZ && freq < MAINS_NOISE_HIGH_HZ)
+            continue;
+
+        // Nyquist'e çok yaklaşma
+        if (freq > MAX_VALID_FREQ_HZ)
+            continue;
 
         if (fft_mag[k] > max_mag) {
             max_mag = fft_mag[k];

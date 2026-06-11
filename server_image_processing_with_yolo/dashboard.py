@@ -132,6 +132,13 @@ def build_summary_dataframe(sessions):
                 "Positive Ratio": safe_get(result, "positive_ratio", 0),
                 "Max Confidence": safe_get(result, "max_confidence", 0),
                 "Total Detections": safe_get(result, "total_detections", 0),
+                "STM32 Final": format_bool(result.get("radar_final_detected")),
+                "STM32 Obj": safe_get(result, "first_stage_decision"),
+                "Confirm Count": safe_get(result, "radar_confirm_count", 0),
+                "Speed (km/h)": safe_get(result, "estimated_speed_kmh", 0),
+                "Freq (Hz)": safe_get(result, "dominant_doppler_frequency_hz", 0),
+                "Power": safe_get(result, "radar_signal_power", 0),
+                "Fusion": safe_get(result, "fusion_decision"),
                 "Elapsed Time (s)": safe_get(result, "elapsed_seconds", 0),
                 "Folder": str(folder),
             }
@@ -355,6 +362,31 @@ st.info(safe_get(result, "decision_reason", "Decision reason not found."))
 
 st.markdown("#### Event Time")
 st.write(f"Session timestamp: **{extract_datetime_from_session_name(selected_session_name)}**")
+
+st.markdown("#### STM32 FINAL Radar Trigger")
+radar_col1, radar_col2, radar_col3, radar_col4 = st.columns(4)
+with radar_col1:
+    st.metric("Final", format_bool(result.get("radar_final_detected")))
+with radar_col2:
+    st.metric("Object", safe_get(result, "first_stage_decision"))
+with radar_col3:
+    st.metric("Confirm Count", safe_get(result, "radar_confirm_count", 0))
+with radar_col4:
+    st.metric("Motion", format_bool(result.get("radar_motion_detected")))
+
+radar_col5, radar_col6, radar_col7, radar_col8 = st.columns(4)
+with radar_col5:
+    st.metric("Power", safe_get(result, "radar_signal_power", 0))
+with radar_col6:
+    st.metric("Freq Hz", safe_get(result, "dominant_doppler_frequency_hz", 0))
+with radar_col7:
+    st.metric("Speed km/h", safe_get(result, "estimated_speed_kmh", 0))
+with radar_col8:
+    st.metric("Fusion", safe_get(result, "fusion_decision"))
+
+raw_radar_message = result.get("radar_raw_message")
+if raw_radar_message:
+    st.code(raw_radar_message, language="text")
 
 
 st.divider()
@@ -606,14 +638,20 @@ st.subheader("STM32 Radar Metadata")
 
 radar_placeholder = {
     "stm32_detection_time": result.get("stm32_detection_time", "Not available"),
+    "radar_final_detected": result.get("radar_final_detected", "Not available"),
+    "radar_confirm_count": result.get("radar_confirm_count", "Not available"),
+    "first_stage_decision": result.get("first_stage_decision", "Not available"),
+    "radar_motion_detected": result.get("radar_motion_detected", "Not available"),
+    "radar_signal_power": result.get("radar_signal_power", "Not available"),
     "dominant_doppler_frequency_hz": result.get(
         "dominant_doppler_frequency_hz", "Not available"
     ),
-    "radar_signal_power": result.get("radar_signal_power", "Not available"),
     "estimated_speed_kmh": result.get("estimated_speed_kmh", "Not available"),
-    "first_stage_decision": result.get("first_stage_decision", "Not available"),
-    "radar_motion_detected": result.get("radar_motion_detected", "Not available"),
+    "stm32_final_motor_trigger": result.get("stm32_final_motor_trigger", "Not available"),
+    "fusion_detected": result.get("fusion_detected", "Not available"),
+    "fusion_decision": result.get("fusion_decision", "Not available"),
     "radar_raw_message": result.get("radar_raw_message", "Not available"),
+    "radar_metadata": result.get("radar_metadata", {}),
 }
 
 st.json(radar_placeholder)

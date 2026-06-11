@@ -17,7 +17,91 @@ volatile uint8_t rx_data;
 volatile uint8_t rx_flag;
 
 
+
 void uart_init(void){
+
+    /*
+     * STM32F411:
+     * PA9  = USART1_TX, AF7
+     * PA10 = USART1_RX, AF7
+     *
+     * Senin SystemClock_Config ayarında:
+     * SYSCLK = 84 MHz
+     * APB2   = 84 MHz
+     * USART1 APB2 üzerindedir.
+     */
+
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+
+    /* PA9 ve PA10 alternate function mode */
+    GPIOA->MODER &= ~((3UL << (9 * 2)) | (3UL << (10 * 2)));
+    GPIOA->MODER |=  ((2UL << (9 * 2)) | (2UL << (10 * 2)));
+
+    /* Push-pull */
+    GPIOA->OTYPER &= ~((1UL << 9) | (1UL << 10));
+
+    /* High speed */
+    GPIOA->OSPEEDR &= ~((3UL << (9 * 2)) | (3UL << (10 * 2)));
+    GPIOA->OSPEEDR |=  ((3UL << (9 * 2)) | (3UL << (10 * 2)));
+
+    /* UART idle-high için pull-up */
+    GPIOA->PUPDR &= ~((3UL << (9 * 2)) | (3UL << (10 * 2)));
+    GPIOA->PUPDR |=  ((1UL << (9 * 2)) | (1UL << (10 * 2)));
+
+    /* PA9/PA10 AFR[1] içindedir, AF7 = USART1 */
+    GPIOA->AFR[1] &= ~((0xFUL << ((9 - 8) * 4)) | (0xFUL << ((10 - 8) * 4)));
+    GPIOA->AFR[1] |=  ((7UL   << ((9 - 8) * 4)) | (7UL   << ((10 - 8) * 4)));
+
+    USART1->CR1 &= ~USART_CR1_UE;
+
+    USART1->CR1 = 0;
+    USART1->CR2 = 0;
+    USART1->CR3 = 0;
+
+    /* 8 bit, oversampling 16 */
+    USART1->CR1 &= ~USART_CR1_M;
+    USART1->CR1 &= ~USART_CR1_OVER8;
+
+    /*
+     * 115200 baud, APB2 = 84 MHz:
+     * USARTDIV = 84,000,000 / (16 * 115200) = 45.5729
+     * Mantissa = 45
+     * Fraction = round(0.5729 * 16) = 9
+     * BRR = 0x02D9
+     */
+    USART1->BRR = (45UL << 4) | 9UL;
+
+    USART1->CR1 |= USART_CR1_TE | USART_CR1_RE;
+
+    USART1->CR1 |= USART_CR1_RXNEIE;
+    NVIC_EnableIRQ(USART1_IRQn);
+
+    USART1->CR1 |= USART_CR1_UE;
+}
+
+
+void USART1_IRQHandler(void){
+    if ((USART1->SR & USART_SR_RXNE) && (USART1->CR1 & USART_CR1_RXNEIE)) {
+        rx_data = (uint8_t)USART1->DR;
+        rx_flag = 1;
+    }
+
+    if ((USART1->SR & USART_SR_TXE) && (USART1->CR1 & USART_CR1_TXEIE)) {
+        if (tx_index < tx_len) {
+            USART1->DR = tx_buffer[tx_index++];
+        } else {
+            USART1->CR1 &= ~USART_CR1_TXEIE;
+        }
+    }
+}
+
+
+// Tüm usart2 ler 1 yapıldı
+
+
+
+void uart_init_eski(void){
 
 
 	RCC->APB1ENR |= (1UL << 17); 		// usart2 clock enable, AF7 için
@@ -98,8 +182,8 @@ void uart_init(void){
 
 void uart_send_char(uint8_t data){
 
-	USART2->DR = data;
-	while( !(USART2->SR & (1UL << 6)) ){};		// Önceki veri gönderilip yeniden gönderilmeye hazıl olunana kadar bekle
+	USART1->DR = data;
+	while( !(USART1->SR & (1UL << 6)) ){};		// Önceki veri gönderilip yeniden gönderilmeye hazıl olunana kadar bekle
 
 	/*
 	 * POLLING BASE UART -> while içinde sürekli beklemek polling yöntemidir. İşlemciyi gereksiz yorar.
@@ -147,9 +231,9 @@ uint8_t uart_read_char(){
 
 	uint8_t temp;
 
-	while(! (USART2->SR & (1UL << 5))){};		// Receive data register okumak için hazır olana kadar bekle
+	while(! (USART1->SR & (1UL << 5))){};		// Receive data register okumak için hazır olana kadar bekle
 
-	temp = USART2->DR;
+	temp = USART1->DR;
 	return temp;
 
 	/*
@@ -215,8 +299,6 @@ void uart_send_string_IT(char* data){
 	 * Sonrasındaki gönderme işlemleri interrupt fonksiyonu üzerinden devam eder.
 	 */
 }
-
-
 
 
 // UART2 Interrupt Handler

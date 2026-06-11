@@ -13,13 +13,27 @@
 #include "arm_math.h"
 #include "stdint.h"
 
-#define FFT_SIZE        256 			// Bu sayı kadar ADC verisi üzerinde FFT uygulanacaktır, 2 nin kuvveti olmalı
-#define SAMPLE_RATE     200.0f
+#define FFT_SIZE        256	// 200  			// Bu sayı kadar ADC verisi üzerinde FFT uygulanacaktır, 2 nin kuvveti olmalı
+#define SAMPLE_RATE     1000.0f	// 1000
 
-#define MOTOR_FREQ_THRESHOLD_HZ  8.0f	// Bu değer FFT sonucu ile karşılaştırılacak kontrol değişkeni, test edilerek belirlenmeli
-#define POWER_THRESHOLD          500.0f	// Bu değer sinyalin gücü ile karşılaştırılacak kontrol değişkenidir,
+#define MOTOR_FREQ_THRESHOLD_HZ  70.0f	// 8	// Bu değer FFT sonucu ile karşılaştırılacak kontrol değişkeni, test edilerek belirlenmeli
+#define POWER_THRESHOLD          10000.0f	// 500	// Bu değer sinyalin gücü ile karşılaştırılacak kontrol değişkenidir,
 										// Sinyalin gücüne göre kontrol edilmesini sağlar, hassasiyet ayarı gibi
 										// Yine boş ortamda ve hareket zamanında ölçülerek belirlenmelidir
+
+
+#define MIN_VALID_FREQ_HZ      2.0f
+// gereksiz gürültülerin filtrelenmesi için
+
+#define MAINS_NOISE_LOW_HZ     2.0f
+#define MAINS_NOISE_HIGH_HZ    5.0f
+// çevre gürültülerinin filtrelenmesi için
+
+
+
+#define MAX_VALID_FREQ_HZ      450.0f
+// işleme alınacak max sinyal değeri  -> 23 km/h yapıyor
+
 
 
 // Tespit sonucu

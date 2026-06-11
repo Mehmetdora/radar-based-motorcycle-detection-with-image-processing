@@ -10,11 +10,13 @@
 
 #include "stm32f4xx.h"
 #include <stdint.h>
+#include "FFT_DSP.h"
 
-#define ADC_BUF_SIZE  256
 
-extern uint16_t adc_buffer[ADC_BUF_SIZE];
-extern uint16_t adc_fft_buffer[ADC_BUF_SIZE];
+
+
+extern uint16_t adc_buffer[FFT_SIZE];
+extern uint16_t adc_fft_buffer[FFT_SIZE];
 extern volatile uint8_t fft_ready_flag;
 
 

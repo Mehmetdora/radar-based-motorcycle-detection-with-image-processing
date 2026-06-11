@@ -17,14 +17,17 @@
 
 
 
+
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+uint8_t check_motor_detected_count(uint8_t *detections);
+
 
 
 volatile uint16_t analog_val = 0;
 
-uint16_t adc_buffer[256];      	// DMA buraya yazar
-uint16_t adc_fft_buffer[256];	// FFT buraya uygulanır
+uint16_t adc_buffer[FFT_SIZE];      	// DMA buraya yazar
+uint16_t adc_fft_buffer[FFT_SIZE];	// FFT buraya uygulanır
 volatile uint8_t fft_ready_flag = 0;
 
 
@@ -56,11 +59,16 @@ int main(void)
   adc1_init();
   dma2_init();
 
-  TimerDriver_init(200);
+  TimerDriver_init(SAMPLE_RATE);	// 200
+
+
+  uint8_t motor_confirmed_list[4] = {0};
 
 
   while (1)
   {
+
+
 
 	  if(fft_ready_flag) {
 		  fft_ready_flag = 0;
@@ -69,13 +77,71 @@ int main(void)
 		  RadarSignalReport report = radar_create_report_from_detection(&result);
 
 		  if(report.motion_detected) {
+
+
+			  // önce ölçülen değerler her seferinde gönderildin izlemek için
 			  radar_format_uart_message(&report, radar_uart_message, sizeof(radar_uart_message));
 			  uart_send_string(radar_uart_message);
+
+
+
+
+
+			  if(report.object_class == DETECT_MOTORSIKLET){
+				  motor_confirmed_list[3] = motor_confirmed_list[2];
+				  motor_confirmed_list[2] = motor_confirmed_list[1];
+				  motor_confirmed_list[1] = motor_confirmed_list[0];
+				  motor_confirmed_list[0] = 1;
+			  }else if(report.object_class == DETECT_YAYA){
+				  motor_confirmed_list[3] = motor_confirmed_list[2];
+				  motor_confirmed_list[2] = motor_confirmed_list[1];
+				  motor_confirmed_list[1] = motor_confirmed_list[0];
+				  motor_confirmed_list[0] = 0;
+			  }
+
+
+			  if(check_motor_detected_count(motor_confirmed_list)){
+				  //uart_send_string("MOTOR TESPIT EDILDI +++++\r\n");
+				  memset(motor_confirmed_list, 0 , sizeof(motor_confirmed_list));
+
+				  radar_format_final_uart_message(&report, radar_uart_message, sizeof(radar_uart_message), MOTOR_CONFIRM_COUNT);
+				  uart_send_string(radar_uart_message);
+
+				  /*
+				   * Bu noktada esp32 tarafına gönderilecek mesajda artık kameranın tetiklenmesi
+				   * başlatılması söylenecek.
+				   *
+				   * Esp32 tarafı uart ile gönderilen bu mesajları işleyerek ilgili komut
+				   * geldi mi diye kontrol etmesi gerekiyor.
+				   */
+
+
+			  }
+
+
 		  }
 
 	  }
 
   }
+}
+
+
+uint8_t check_motor_detected_count(uint8_t *detections){
+
+	uint8_t counts = 0;
+	for(int i = 0; i<4;i++){
+		if(detections[i] == 1){
+			counts++;
+		}
+	}
+
+	if(counts >= MOTOR_CONFIRM_COUNT){
+		return 1;
+	}else{
+		return 0;
+	}
+
 }
 
 /**

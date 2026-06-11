@@ -7,6 +7,7 @@
 
 #include "ADC_DMA_Config.h"
 #include "IIR_DSP.h"
+#include "ADC_DMA_Config.h"
 
 
 
@@ -38,7 +39,7 @@ void dma2_init(){
 	DMA2_Stream0->CR |= (2UL << 16);	// DMA2 priority level high
 	DMA2_Stream0->CR &= ~(7UL << 25);	// DMA2 chanel 0
 
-	DMA2_Stream0->NDTR = ADC_BUF_SIZE;	// Kaç kere transfer yapılacağı
+	DMA2_Stream0->NDTR = FFT_SIZE;	// Kaç kere transfer yapılacağı
 	DMA2_Stream0->PAR = (uint32_t)&ADC1->DR;	// Peripheral adress
 	DMA2_Stream0->M0AR = (uint32_t)adc_buffer;	// Memory adress
 
@@ -93,8 +94,8 @@ void adc1_init(void){
 
 	HAL_Delay(10);
 
-	FirstOrderIIR_Init(&filt, IIR_ALPHA);
-
+	//FirstOrderIIR_Init(&filt, IIR_ALPHA);
+	// IIR filtresi kullanılmayacak artık, raw sinyal FFT tarafından işleniyor
 }
 
 
@@ -109,7 +110,7 @@ void DMA2_Stream0_IRQHandler(void) {
         DMA2->LIFCR |= (1UL << 5);  // flag temizle
 
 
-        for(uint16_t i = 0; i < ADC_BUF_SIZE; i++) {
+        for(uint16_t i = 0; i < FFT_SIZE; i++) {
 
 
         	//float filtered = FirstOrderIIR_Update(&filt, adc_buffer[i]);
@@ -133,8 +134,8 @@ void DMA2_Stream0_IRQHandler(void) {
 
         	adc_fft_buffer[i] = adc_buffer[i];
 
-        	debug_raw_sample = adc_buffer[ADC_BUF_SIZE - 1];
-        	debug_filtered_sample = adc_fft_buffer[ADC_BUF_SIZE - 1];
+        	debug_raw_sample = adc_buffer[FFT_SIZE - 1];
+        	debug_filtered_sample = adc_fft_buffer[FFT_SIZE - 1];
 		}
 
 

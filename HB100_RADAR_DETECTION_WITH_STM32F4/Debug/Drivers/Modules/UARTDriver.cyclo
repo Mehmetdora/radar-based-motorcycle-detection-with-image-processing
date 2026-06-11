@@ -1,8 +1,10 @@
 ../Drivers/CMSIS/Include/core_cm4.h:1684:22:__NVIC_EnableIRQ	2
-../Drivers/Modules/UARTDriver.c:20:6:uart_init	1
-../Drivers/Modules/UARTDriver.c:99:6:uart_send_char	2
-../Drivers/Modules/UARTDriver.c:126:6:uart_send_string	2
-../Drivers/Modules/UARTDriver.c:146:9:uart_read_char	2
-../Drivers/Modules/UARTDriver.c:184:9:uart_read_char_IT	1
-../Drivers/Modules/UARTDriver.c:195:6:uart_send_string_IT	1
-../Drivers/Modules/UARTDriver.c:223:6:USART2_IRQHandler	6
+../Drivers/Modules/UARTDriver.c:21:6:uart_init	1
+../Drivers/Modules/UARTDriver.c:84:6:USART1_IRQHandler	6
+../Drivers/Modules/UARTDriver.c:104:6:uart_init_eski	1
+../Drivers/Modules/UARTDriver.c:183:6:uart_send_char	2
+../Drivers/Modules/UARTDriver.c:210:6:uart_send_string	2
+../Drivers/Modules/UARTDriver.c:230:9:uart_read_char	2
+../Drivers/Modules/UARTDriver.c:268:9:uart_read_char_IT	1
+../Drivers/Modules/UARTDriver.c:279:6:uart_send_string_IT	1
+../Drivers/Modules/UARTDriver.c:305:6:USART2_IRQHandler	6

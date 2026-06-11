@@ -21,7 +21,7 @@ PROTOCOL_MAGIC = b"RDR1"
 MAX_METADATA_BYTES = 1024
 
 SAVE_DIR = Path.home() / "Desktop" / "esp32_photos"
-MODEL_PATH = Path.home() / "Desktop" / "best.pt"
+MODEL_PATH = Path.home() / "Desktop" / "Bitirme Projesi" / "best.pt"
 
 CONF_THRESHOLD = 0.60  # bir resmin doğrulanması için minimum treshold
 STRONG_CONF_THRESHOLD = (
@@ -82,18 +82,92 @@ def recv_session_header(conn):
     return frame_count, {}, False
 
 
+def to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "evet", "on")
+    return False
+
+
+def to_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def to_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_radar_metadata(radar_metadata):
+    """
+    ESP32 tarafındaki yeni RDR1 metadata formatını normalize eder.
+
+    Beklenen ESP32 JSON alanları:
+      final, confirm_count, obj, motion, power, freq_hz, speed_kmh, raw
+    """
+    if not radar_metadata:
+        return {}
+
+    obj = str(radar_metadata.get("obj", "")).strip().upper()
+
+    return {
+        "source": radar_metadata.get("source", "STM32_HB100"),
+        "raw": radar_metadata.get("raw", ""),
+        "final": to_bool(radar_metadata.get("final")),
+        "confirm_count": to_int(radar_metadata.get("confirm_count"), 0),
+        "obj": obj,
+        "motion": to_bool(radar_metadata.get("motion")),
+        "power": to_float(radar_metadata.get("power"), 0.0),
+        "freq_hz": to_float(radar_metadata.get("freq_hz"), 0.0),
+        "speed_kmh": to_float(radar_metadata.get("speed_kmh"), 0.0),
+    }
+
+
+def is_valid_final_motor_metadata(radar_metadata):
+    """Server tarafında ikinci güvenlik filtresi."""
+    if not radar_metadata:
+        return False
+
+    return (
+        radar_metadata.get("final") is True
+        and radar_metadata.get("obj") == "MOTOR"
+        and radar_metadata.get("motion") is True
+    )
+
+
 def enrich_result_with_radar_metadata(result, radar_metadata):
     if not radar_metadata:
         return result
 
+    radar_metadata = normalize_radar_metadata(radar_metadata)
+
     result["radar_metadata"] = radar_metadata
     result["stm32_detection_time"] = datetime.now().isoformat(timespec="seconds")
+    result["radar_final_detected"] = radar_metadata.get("final")
+    result["radar_confirm_count"] = radar_metadata.get("confirm_count")
     result["dominant_doppler_frequency_hz"] = radar_metadata.get("freq_hz")
     result["radar_signal_power"] = radar_metadata.get("power")
     result["estimated_speed_kmh"] = radar_metadata.get("speed_kmh")
     result["first_stage_decision"] = radar_metadata.get("obj")
-    result["radar_motion_detected"] = bool(radar_metadata.get("motion"))
+    result["radar_motion_detected"] = radar_metadata.get("motion")
     result["radar_raw_message"] = radar_metadata.get("raw")
+
+    # İki aşamalı karar: STM32 final MOTOR dedi mi + YOLO doğruladı mı?
+    result["stm32_final_motor_trigger"] = is_valid_final_motor_metadata(radar_metadata)
+    result["fusion_detected"] = bool(result.get("detected")) and result["stm32_final_motor_trigger"]
+    result["fusion_decision"] = (
+        "STM32 FINAL MOTOR + KAMERA DOĞRULADI"
+        if result["fusion_detected"]
+        else "KAMERA DOĞRULAMADI VEYA STM32 FINAL MOTOR DEĞİL"
+    )
 
     return result
 
@@ -271,8 +345,14 @@ while True:
         print(f"{frame_count} kare bekleniyor")
 
         if radar_metadata:
+            radar_metadata = normalize_radar_metadata(radar_metadata)
             print("\nRadar metadata alindi:")
             print(json.dumps(radar_metadata, ensure_ascii=False, indent=2))
+
+            if not is_valid_final_motor_metadata(radar_metadata):
+                raise ValueError(
+                    "Gecersiz radar tetigi: Server sadece FINAL=true, OBJ=MOTOR, MOTION=1 metadata kabul eder."
+                )
 
         for i in range(frame_count):
             size = struct.unpack(">I", recv_exact(conn, 4))[0]
@@ -313,12 +393,15 @@ while True:
 
         if radar_metadata:
             print("\nSTM32 Radar Bilgisi:")
+            print(f"  Final tespit       : {'EVET' if result['radar_final_detected'] else 'HAYIR'}")
+            print(f"  Confirm count      : {result['radar_confirm_count']}")
             print(f"  Nesne sinifi       : {result['first_stage_decision']}")
             print(f"  Hareket algilandi  : {'EVET' if result['radar_motion_detected'] else 'HAYIR'}")
             print(f"  Sinyal gucu        : {result['radar_signal_power']}")
             print(f"  Frekans            : {result['dominant_doppler_frequency_hz']} Hz")
             print(f"  Hiz                : {result['estimated_speed_kmh']} km/h")
             print(f"  Ham mesaj          : {result['radar_raw_message']}")
+            print(f"  Fusion karar       : {result['fusion_decision']}")
 
         print("\nSınıf özeti:")
         if result["class_summary"]:
@@ -373,6 +456,8 @@ while True:
             f.write("-------------------\n")
             if radar_metadata:
                 f.write(f"Protokol            : {protocol_version}\n")
+                f.write(f"Final tespit        : {'EVET' if result['radar_final_detected'] else 'HAYIR'}\n")
+                f.write(f"Confirm count       : {result['radar_confirm_count']}\n")
                 f.write(f"Ham mesaj           : {result['radar_raw_message']}\n")
                 f.write(f"Nesne sınıfı        : {result['first_stage_decision']}\n")
                 f.write(
@@ -382,7 +467,8 @@ while True:
                 f.write(
                     f"Doppler frekansı    : {result['dominant_doppler_frequency_hz']} Hz\n"
                 )
-                f.write(f"Tahmini hız         : {result['estimated_speed_kmh']} km/h\n\n")
+                f.write(f"Tahmini hız         : {result['estimated_speed_kmh']} km/h\n")
+                f.write(f"Fusion karar        : {result['fusion_decision']}\n\n")
             else:
                 f.write("Bu oturumda radar metadata alınmadı.\n\n")
 
