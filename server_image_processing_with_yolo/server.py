@@ -21,16 +21,15 @@ PROTOCOL_MAGIC = b"RDR1"
 MAX_METADATA_BYTES = 1024
 
 SAVE_DIR = Path.home() / "Desktop" / "esp32_photos"
-MODEL_PATH = Path.home() / "Desktop" / "Bitirme Projesi" / "best.pt"
+MODEL_PATH = Path.home() / "Desktop" / "Bitirme Projesi" / "motorcycle_yolo.pt"
 
-CONF_THRESHOLD = 0.60  # bir resmin doğrulanması için minimum treshold
-STRONG_CONF_THRESHOLD = (
-    0.70  # bu treshold'dan daha yüksek bir tane resim olursa sonuç pozitif
-)
+CONF_THRESHOLD = 0.35
+STRONG_CONF_THRESHOLD = 0.65
+
 MIN_POSITIVE_FRAMES = (
     10  # çekilen resimlerden sonucu belirlemek için min pozitif resim sayısı
 )
-IMG_SIZE = 640
+IMG_SIZE = 768
 
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
