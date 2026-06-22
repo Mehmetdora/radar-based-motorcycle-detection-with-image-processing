@@ -6,15 +6,15 @@ A low-cost, radar-triggered sidewalk motorcycle detection prototype designed to 
 
 This project was developed as a graduation thesis at Çukurova University, Department of Computer Engineering.
 
-The main goal of the system is to detect suspicious motorcycle-like movement on sidewalks without continuously processing video streams. Instead of running object detection on city cameras 24/7, the proposed architecture uses a low-cost Doppler radar module as a first-stage trigger. When the radar detects fast movement, an ESP32-S3 Sense camera captures a short image burst and sends it to a server. The server then performs YOLO11s-based visual validation, logs the event, and displays the results on a dashboard.
+The main goal of the system is to detect suspicious motorcycle movement on sidewalks without continuously processing video streams. Instead of running object detection on city cameras 24/7, the proposed architecture uses a low-cost Doppler radar module as a first-stage trigger. When the radar detects fast motorcycle-like movement, an ESP32-S3 Sense camera captures a short image burst and sends it to a server. The server then performs YOLO11s-based motorcycle detection, logs the event, and displays the results on a dashboard.
 
-The prototype demonstrates an event-triggered radar-camera validation workflow. Due to dataset limitations, the visual validation stage was tested with a proxy object class instead of real sidewalk motorcycle images. For real deployment, the YOLO model must be retrained or fine-tuned using a dataset containing motorcycles on sidewalks.
-
+The prototype demonstrates an event-triggered radar-camera validation workflow. In the updated implementation, the visual validation model was trained with real motorcycle images. Therefore, the system performs object detection directly on the motorcycle target class instead of using a proxy object.
 
 ## Demo Videos
 
 * [Video 1 – Radar signal and system demonstration](https://youtu.be/Pqjs36R-g7s)
 * [Video 2 – Radar signal and system demonstration 2](https://youtu.be/cXx1Mhaml8s)
+* [Video 3 - Speed and detection test-explanation with HB100](https://youtu.be/M53GATuA4gE)
 
 ## Main Features
 
@@ -25,7 +25,7 @@ The prototype demonstrates an event-triggered radar-camera validation workflow. 
 * UART-based trigger communication between STM32 and ESP32-S3
 * ESP32-S3 Sense camera image burst capture
 * Wi-Fi image transmission to a Python server
-* Server-side YOLO11s validation
+* Server-side YOLO11s motorcycle detection
 * Event logging with confidence scores, best frame selection, and analysis time
 * Streamlit dashboard for event inspection and result visualization
 * Low-cost and scalable prototype architecture for smart city applications
@@ -49,7 +49,7 @@ Wi-Fi Image Transmission
         ↓
 Python Server
         ↓
-YOLO11s Validation
+YOLO11s Motorcycle Detection
         ↓
 Event Logging + Streamlit Dashboard
 ```
@@ -64,7 +64,7 @@ Event Logging + Streamlit Dashboard
 | ESP32-S3 Sense Board       | Captures images after receiving a trigger                                          |
 | Camera Module              | Provides visual data for server-side validation                                    |
 | Wi-Fi Network              | Transfers captured images and event data to the server                             |
-| Server Computer            | Runs YOLO11s inference, stores logs, and serves dashboard output                   |
+| Server Computer            | Runs YOLO11s inference, stores logs, and serves dashboard output                    |
 
 ## Software Components
 
@@ -114,13 +114,14 @@ Frame interval: ~45 ms
 
 ### Python Server
 
-The Python server receives image bursts from the ESP32 and performs visual validation.
+The Python server receives image bursts from the ESP32 and performs visual motorcycle detection.
 
 Main tasks:
 
 * Receives image frames through network communication
 * Saves each event as a separate image burst
 * Runs YOLO11s inference on received frames
+* Detects motorcycle objects in the captured images
 * Records frame-level and event-level detection results
 * Selects the best frame based on confidence score
 * Stores structured logs for dashboard visualization
@@ -139,24 +140,23 @@ Main features:
 * Downloadable logs and result files
 * Inspection of supporting evidence for each detected event
 
-## YOLO11s Validation
+## YOLO11s Motorcycle Detection
 
 The server-side validation stage uses YOLO11s for object detection.
 
-In the intended final system, this stage should detect whether the event contains a motorcycle on a sidewalk. However, because a real sidewalk motorcycle dataset could not be collected during prototype testing, the system was tested using a lighter object as a proxy target class.
+In the updated prototype, the model was trained with real motorcycle images. The purpose of this stage is to determine whether the radar-triggered image burst contains a motorcycle. Each received frame is analyzed separately, and the final event decision is made using multi-frame evidence.
 
-Therefore, the current prototype validates:
+The YOLO11s validation stage provides:
 
-* Event-triggered image capture
-* Image burst transmission
-* Server-side inference
-* Multi-frame decision logic
-* Event logging
-* Dashboard visualization
+* Motorcycle object detection
+* Frame-level confidence scores
+* Positive and negative frame counting
+* Best frame selection
+* Event-level decision generation
+* Structured TXT, JSON, and CSV output files
+* Dashboard-ready detection results
 
-It does not claim final real-world motorcycle detection accuracy.
-
-For real deployment, the model should be retrained or fine-tuned using real sidewalk motorcycle images.
+The system does not rely on a single frame only. Instead, all frames in the event burst are evaluated together. This improves the reliability of the final decision because the event is validated using both the number of positive frames and the highest detection confidence.
 
 ## Why Radar-Triggered Detection?
 
@@ -172,6 +172,8 @@ This project proposes a more efficient approach:
 | Camera-only detection          | Radar + camera + server validation       |
 | Less scalable for many cameras | More scalable for selected problem areas |
 
+The radar unit acts as a low-cost pre-detection layer. The camera and YOLO model are activated only when the radar detects suspicious fast movement. This reduces unnecessary image processing and allows the system to focus on relevant time intervals.
+
 ## Experimental Results
 
 The prototype confirmed that the system can perform the complete event-triggered workflow:
@@ -181,6 +183,7 @@ The prototype confirmed that the system can perform the complete event-triggered
 * Trigger messages activate ESP32 image capture
 * ESP32 sends captured image bursts to the server
 * YOLO11s processes incoming frames
+* Motorcycle detections are generated from real motorcycle images
 * Event-level outputs are generated
 * Dashboard displays detections, best frames, confidence values, and logs
 
@@ -197,21 +200,21 @@ Since the system is designed for event-based validation instead of continuous vi
 
 The current prototype has several limitations:
 
-* The YOLO model was not trained with real sidewalk motorcycle images.
-* A lighter object was used as a proxy class during visual validation.
+* The dataset size is limited compared to large-scale real-world surveillance datasets.
 * The HB100 radar has a practical detection range of approximately 15 meters in the prototype.
 * ESP32-S3 Sense camera quality is limited compared to professional surveillance cameras.
 * Detection performance may decrease under poor lighting, motion blur, distance, or partial visibility.
 * Radar thresholds require calibration for different environments.
 * Radar alone cannot reliably distinguish motorcycles from all other fast-moving objects.
-* Real-world deployment requires a larger dataset, outdoor testing, and improved model training.
+* Real-world deployment requires a larger dataset, outdoor testing, and improved model validation.
+* The system is a prototype and is not yet a production-ready traffic violation detection system.
 
 ## Future Work
 
 Planned improvements include:
 
-* Collecting a real sidewalk motorcycle image dataset
-* Fine-tuning YOLO11s or another YOLO model for motorcycle sidewalk violation detection
+* Expanding the motorcycle image dataset with more sidewalk and outdoor scenarios
+* Fine-tuning YOLO11s or another YOLO model with a larger and more diverse motorcycle dataset
 * Testing the system in real outdoor sidewalk environments
 * Improving radar threshold calibration
 * Using a longer-range or more advanced radar module
@@ -219,6 +222,7 @@ Planned improvements include:
 * Adding street camera integration for event-based video interval extraction
 * Deploying multiple devices in selected high-risk urban locations
 * Adding cloud-based monitoring and municipality-level integration
+* Improving robustness against lighting changes, motion blur, and partial occlusion
 
 ## Technologies Used
 
@@ -236,34 +240,37 @@ Planned improvements include:
 * YOLO11s
 * Streamlit
 
-
 ## Academic Context
 
 This project was developed as a graduation thesis:
 
-**Title:**
+**Title:**  
 A Radar-Triggered Sidewalk Motorcycle Detection System for Reducing Continuous Video Processing Costs
 
-**Author:**
+**Advisors:**
+- Arş. Gör. Üyesi BARIŞ ATA
+- Prof. Dr. Mustafa GÖK(Department of Electrical and Electronics Engineering)
+
+**Author:**  
 Mehmet Dora
 
-**University:**
-Çukurova University
-Faculty of Engineering
+**University:**  
+Çukurova University  
+Faculty of Engineering  
 Department of Computer Engineering
 
-**Year:**
+**Year:**  
 2026
 
 ## Disclaimer
 
-This repository contains a prototype implementation. The current system demonstrates the radar-triggered image acquisition, server-side YOLO inference, event logging, and dashboard workflow. It is not yet a production-ready motorcycle violation detection system.
+This repository contains a prototype implementation. The current system demonstrates radar-triggered image acquisition, server-side YOLO11s motorcycle detection, event logging, and dashboard visualization. It is not yet a production-ready motorcycle violation detection system.
 
 A real-world deployment requires:
 
-* A real sidewalk motorcycle dataset
-* Model retraining or fine-tuning
-* Outdoor validation
+* Larger and more diverse motorcycle datasets
+* Additional model training and validation
+* Outdoor validation under different environmental conditions
 * Environmental robustness testing
 * Legal and privacy compliance checks
 * Integration with official city camera infrastructure
