@@ -2,6 +2,8 @@
 
 A low-cost, radar-triggered sidewalk motorcycle detection prototype designed to reduce the cost of continuous video processing in urban surveillance systems.
 
+Project page: https://www.mehmetdora.me/projects/my-graduation-project
+
 ## Project Overview
 
 This project was developed as a graduation thesis at Çukurova University, Department of Computer Engineering.
